@@ -274,3 +274,105 @@ b18e5f22-763a-4224-b597-e8ef257dfb92.privatelink.koreacentral.azmk8s.io/md-aks-n
 kube-apiserver                                                                                              MC_newyear-aks_md-aks_koreacentral  koreacentral  Microsoft.Network/privateEndpoints
 c62b2af7-fa6c-4d02-be95-d61f39aee703                                                                        MC_newyear-aks_md-aks_koreacentral  koreacentral  Microsoft.Network/publicIPAddresses
 ~~~~
+
+
+# aksにACRをアタッチする。
+
+~~~
+az aks update -n md-aks -g newyear-aks --attach-acr /subscriptions/xxxx/resourceGroups/aks-win-poc/providers/Microsoft.ContainerRegistry/registries/xxxx
+~~~
+
+
+# kubectlでログインする。
+
+~~~
+az aks get-credentials --name md-aks --resource-group newyear-aks
+~~~
+
+
+# name spaceを作成する。
+
+~~~
+kubectl create namespace md
+~~~
+
+# ロードバランサーを含むリソースをデプロイする。
+
+## カスタムロールを作成し、AKSクラスターに割り当てを行う。(管理者作業)
+カスタムロールを定義したjsonファイルを作成する。
+~~~
+$ cat ./aks-customRole.json
+{
+  "Name": "Aks - Create Internal L4 Load Balancer",
+  "IsCustom": true,
+  "Description": "Create Internal Load Balancer as Kubernete Service Resource",
+  "Actions": [
+    "Microsoft.Network/virtualNetworks/subnets/read",
+    "Microsoft.Network/virtualNetworks/subnets/join/action",
+    "Microsoft.Network/loadBalancers/write"
+  ],
+  "NotActions": [
+  ],
+  "AssignableScopes": [
+    "/subscriptions/203a21ce-5bb9-4bcc-a15d-34ac3a4850d9/resourceGroups/newyear-aks/providers/Microsoft.Network/virtualNetworks/newyear-aks/subnets/aks-subnet",
+    "/subscriptions/203a21ce-5bb9-4bcc-a15d-34ac3a4850d9/resourceGroups/mc_newyear-aks_md-aks_koreacentral/providers/Microsoft.Network/loadBalancers/kubernetes-internal"
+  ]
+}
+~~~
+
+カスタムロールをデプロイする。
+~~~
+% az role definition create --role-definition ./aks-customRole.json
+{
+  "assignableScopes": [
+    "/subscriptions/203a21ce-5bb9-4bcc-a15d-34ac3a4850d9/resourceGroups/newyear-aks/providers/Microsoft.Network/virtualNetworks/newyear-aks/subnets/aks-subnet"
+  ],
+  "description": "Create Internal Load Balancer as Kubernete Service Resource",
+  "id": "/subscriptions/203a21ce-5bb9-4bcc-a15d-34ac3a4850d9/providers/Microsoft.Authorization/roleDefinitions/cda73c4a-53ed-464f-a404-77ac28569fd4",
+  "name": "cda73c4a-53ed-464f-a404-77ac28569fd4",
+  "permissions": [
+    {
+      "actions": [
+        "Microsoft.Network/virtualNetworks/subnets/read"
+      ],
+      "dataActions": [],
+      "notActions": [],
+      "notDataActions": []
+    }
+  ],
+  "roleName": "Aks - Create Internal L4 Load Balancer",
+  "roleType": "CustomRole",
+  "type": "Microsoft.Authorization/roleDefinitions"
+}
+~~~
+
+クラスターに割り当てられたプリンシパルを確認する。
+~~~
+$ az aks show --name md-aks --resource-group newyear-aks --query identity
+{
+  "principalId": "37ed99e1-ad8f-4368-97cc-bcd9dc43f0d2",
+  "tenantId": "b36fe5e6-3c3d-44a1-b607-7b9a862ff87d",
+  "type": "SystemAssigned",
+  "userAssignedIdentities": null
+}
+~~~
+
+カスタムロールを付与する。
+~~~
+ % az role assignment create --assignee "37ed99e1-ad8f-4368-97cc-bcd9dc43f0d2" \
+--role "cda73c4a-53ed-464f-a404-77ac28569fd4" --scope "/subscriptions/203a21ce-5bb9-4bcc-a15d-34ac3a4850d9/resourceGroups/newyear-aks/providers/Microsoft.Network/virtualNetworks/newyear-aks/subnets/aks-subnet"
+{
+  "canDelegate": null,
+  "condition": null,
+  "conditionVersion": null,
+  "description": null,
+  "id": "/subscriptions/203a21ce-5bb9-4bcc-a15d-34ac3a4850d9/resourceGroups/newyear-aks/providers/Microsoft.Network/virtualNetworks/newyear-aks/subnets/aks-subnet/providers/Microsoft.Authorization/roleAssignments/c4f5e5d8-5154-4de9-8974-ea3152557344",
+  "name": "c4f5e5d8-5154-4de9-8974-ea3152557344",
+  "principalId": "37ed99e1-ad8f-4368-97cc-bcd9dc43f0d2",
+  "principalType": "ServicePrincipal",
+  "resourceGroup": "newyear-aks",
+  "roleDefinitionId": "/subscriptions/203a21ce-5bb9-4bcc-a15d-34ac3a4850d9/providers/Microsoft.Authorization/roleDefinitions/cda73c4a-53ed-464f-a404-77ac28569fd4",
+  "scope": "/subscriptions/203a21ce-5bb9-4bcc-a15d-34ac3a4850d9/resourceGroups/newyear-aks/providers/Microsoft.Network/virtualNetworks/newyear-aks/subnets/aks-subnet",
+  "type": "Microsoft.Authorization/roleAssignments"
+}
+~~~
